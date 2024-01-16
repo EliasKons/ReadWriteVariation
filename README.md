@@ -1,27 +1,49 @@
-The program is built with the command:
-make
+# ReadWriteVariation
 
-The program is built and run with the command:
-make run
+This program reads a text file using multiple child processes, each handling a specific segment of the file.
 
-The program is built and run with valgrind with the command:
-make valgrind
+## Building the Program
 
-Object files and text files created by children are destroyed with the command:
-make clean
+The program can be built using the following commands:
 
-Command line arguments can be changed in the makefile in the ARGS variable
+- Build: `make`
+- Build and Run: `make run`
+- Build and Run with Valgrind: `make valgrind`
+- Clean: `make clean`
 
-The parent process first counts the number of lines in the text file. The segments are then separated by the lines/segments ratio (with the last segment to also take the lines resulting from lines%segments). There are 4 different memory attachments: 1 struct shared_memory for the semaphores, the segment number, the number of lines and the total requests that have been made, 1 mutex semaphore table with the same size as the segments, 1 semlock_string string that stores the segment as a string and 1 semlock_count integer array with the size of the segments to set the input and output of each segment in the shared memory and the critical section.
+Command line arguments can be modified in the `makefile` under the `ARGS` variable.
 
-The struct shared_memory contains 3 semaphores: the rw_mutex, used to enter and exit the first children with different segments in critical section, and the requestConsumer and answerProducer for child-parent communication.
+## Program Overview
 
-It then creates n children, calls the child function for each of them and initializes the segments using the strings text array.
+The parent process counts the number of lines in the text file and separates segments based on the lines/segments ratio. The program utilizes multiple memory attachments for synchronization:
 
-A "request" is considered the inclusion of the segment number in the shared memory by the first child (or the theoretical inclusion of this number by the other children) and as an "answer" is considered the acquisition of the line by the process. From there, the placement for the calculations of the corresponding times is justified.
+1. **Shared Memory Struct**: Contains semaphores for managing access to shared resources such as the semaphore table, string segment, and count array.
+2. **Mutex Semaphore Table**: Sized according to the number of segments to control access to each segment.
+3. **Semlock String**: Ensures exclusive access to the string segment.
+4. **Semlock Count**: Integer array used to set input and output of each segment in shared memory.
 
-The parent works as follows: It waits for a request from a child (wait(requestConsumer)). In the special case where the maximum number of requests have been made, then it stops. Returns the requested segment and its number of lines in shared memory. Notifies the child that it has finished loading its segment (post(answerProducer)).
+The shared memory struct includes three semaphores:
 
-Children work as follows: They randomly choose one of the available segments. Children with shared segments are placed in a FIFO queue (wait(mutex[segment])). The first children from each segment also enter a FIFO queue (wait(rw_mutex)). The first child puts its segment in shared memory, makes a request to the parent(post(requestConsumer)) and waits for a response (wait(answerProducer)). It increases the number of requests by 1 and in the case that the requests exceed their limit, informs the parent to stop. Then all the children in the child's segment enter the critical section (post(mutex[segment])) and these in turn increase the requests and inform the parent in case it has to stop. Every child that is in the critical section takes a random line from the segment and prints it to its text file and finally waits for 20ms. These children come in in a FIFO queue (wait(mutex[segment])) and essentially exit it in turn immediately (post(mutex[segment])), except for the last child that leaves the next first child with a different segment to enter the critical section (post(rw_mutex)).
+- `rw_mutex`: Allows the first child with different segments to enter and exit the critical section.
+- `requestConsumer`: Manages child-parent communication for requests.
+- `answerProducer`: Manages child-parent communication for answers.
 
-Finally, both the parent process and the children release the memory they committed and the memory segments are detached and destroyed.
+## Parent Process
+
+1. Waits for a request from a child (`wait(requestConsumer)`).
+2. If the maximum number of requests is reached, the parent stops; otherwise, it returns the requested segment and its number of lines in shared memory.
+3. Notifies the child that it has finished loading its segment (`post(answerProducer)`).
+
+## Child Processes
+
+1. Randomly choose an available segment.
+2. Children with shared segments enter a FIFO queue (`wait(mutex[segment])`).
+3. The first child from each segment enters a FIFO queue (`wait(rw_mutex)`), puts its segment in shared memory, makes a request to the parent (`post(requestConsumer)`), and waits for a response (`wait(answerProducer)`).
+4. Increments the number of requests; if requests exceed the limit, informs the parent to stop.
+5. All children in the segment enter the critical section (`post(mutex[segment])`), increase requests, and inform the parent if it needs to stop.
+6. Each child in the critical section takes a random line from the segment, prints it to its text file, and waits for 20ms.
+7. Children exit the critical section in a FIFO queue (`wait(mutex[segment])`), except the last child that allows the next first child with a different segment to enter the critical section (`post(rw_mutex)`).
+
+## Cleaning Up
+
+Both the parent process and the children release the committed memory, detach, and destroy the memory segments.
